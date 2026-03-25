@@ -26,8 +26,7 @@ async function getDirectVideoUrl(videoId) {
     }
   })
   const data = await response.json()
-
-  // מחפש פורמט mp4 עד 720p
+  console.log('RapidAPI response:', JSON.stringify(data).slice(0, 500))
   const formats = data.adaptiveFormats || data.formats || []
   const mp4 = formats
     .filter(f => f.mimeType?.includes('video/mp4') && f.qualityLabel)
