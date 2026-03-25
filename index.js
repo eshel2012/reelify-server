@@ -34,9 +34,9 @@ app.post('/clip', async (req, res) => {
     if (!videoId) return res.status(400).json({ error: 'Invalid YouTube URL' })
 
     console.log('Fetching video info for:', videoId)
-    const { data } = await axios.get(`https://yt-api.p.rapidapi.com/dl?id=${videoId}`, {
+    const { data } = await axios.get(`https://ytstream-download-youtube-videos.p.rapidapi.com/dl?id=${videoId}`, {
       headers: {
-        'x-rapidapi-host': 'yt-api.p.rapidapi.com',
+        'x-rapidapi-host': 'ytstream-download-youtube-videos.p.rapidapi.com',
         'x-rapidapi-key': process.env.RAPIDAPI_KEY
       }
     })
