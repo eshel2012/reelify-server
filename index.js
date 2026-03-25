@@ -2,50 +2,23 @@ const express = require('express')
 const cors = require('cors')
 const { execSync } = require('child_process')
 const fs = require('fs')
-const https = require('https')
+const axios = require('axios')
 
 const app = express()
 app.use(cors())
 app.use(express.json())
 
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok' })
-})
+app.get('/health', (req, res) => res.json({ status: 'ok' }))
 
 function getVideoId(url) {
   const match = url.match(/(?:v=|youtu\.be\/)([^&?/]+)/)
   return match ? match[1] : null
 }
 
-async function getDirectVideoUrl(videoId) {
-  const response = await fetch(`https://yt-api.p.rapidapi.com/dl?id=${videoId}`, {
-    method: 'GET',
-    headers: {
-      'x-rapidapi-host': 'yt-api.p.rapidapi.com',
-      'x-rapidapi-key': process.env.RAPIDAPI_KEY
-    }
-  })
-  const data = await response.json()
-  console.log('RapidAPI response:', JSON.stringify(data).slice(0, 500))
-  const formats = data.adaptiveFormats || data.formats || []
-  const mp4 = formats
-    .filter(f => f.mimeType?.includes('video/mp4') && f.qualityLabel)
-    .sort((a, b) => {
-      const qa = parseInt(a.qualityLabel) || 0
-      const qb = parseInt(b.qualityLabel) || 0
-      return qb - qa
-    })
-    .find(f => parseInt(f.qualityLabel) <= 720)
-
-  return mp4?.url || null
-}
-
 app.post('/clip', async (req, res) => {
   const { url, startTime, endTime } = req.body
-
-  if (!url || !startTime || !endTime) {
+  if (!url || !startTime || !endTime)
     return res.status(400).json({ error: 'Missing params' })
-  }
 
   const startParts = startTime.split(':').map(Number)
   const endParts = endTime.split(':').map(Number)
@@ -60,14 +33,32 @@ app.post('/clip', async (req, res) => {
     const videoId = getVideoId(url)
     if (!videoId) return res.status(400).json({ error: 'Invalid YouTube URL' })
 
-    const directUrl = await getDirectVideoUrl(videoId)
-    if (!directUrl) return res.status(500).json({ error: 'Could not get video URL' })
+    console.log('Fetching video info for:', videoId)
+    const { data } = await axios.get(`https://yt-api.p.rapidapi.com/dl?id=${videoId}`, {
+      headers: {
+        'x-rapidapi-host': 'yt-api.p.rapidapi.com',
+        'x-rapidapi-key': process.env.RAPIDAPI_KEY
+      }
+    })
 
-    // FFmpeg מוריד ישירות מהURL וחותך
+    console.log('RapidAPI status:', data.status)
+    console.log('Formats available:', (data.adaptiveFormats || data.formats || []).length)
+
+    const formats = data.adaptiveFormats || data.formats || []
+    const mp4 = formats
+      .filter(f => f.mimeType?.includes('video/mp4') && f.qualityLabel)
+      .sort((a, b) => parseInt(b.qualityLabel) - parseInt(a.qualityLabel))
+      .find(f => parseInt(f.qualityLabel) <= 720)
+
+    if (!mp4) {
+      console.log('No mp4 format found, data:', JSON.stringify(data).slice(0, 300))
+      return res.status(500).json({ error: 'No video format found' })
+    }
+
+    console.log('Using quality:', mp4.qualityLabel)
+
     execSync(
-      `ffmpeg -ss ${start} -t ${duration} -i "${directUrl}" \
-      -vf "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2" \
-      -c:v libx264 -c:a aac "${outputFile}"`,
+      `ffmpeg -ss ${start} -t ${duration} -i "${mp4.url}" -c:v libx264 -c:a aac "${outputFile}"`,
       { timeout: 120000 }
     )
 
@@ -79,9 +70,9 @@ app.post('/clip', async (req, res) => {
       if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile)
     })
   } catch (err) {
-    console.error(err)
+    console.error('Error:', err.message)
     if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile)
-    res.status(500).json({ error: 'Failed to create clip' })
+    res.status(500).json({ error: err.message })
   }
 })
 
